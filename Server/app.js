@@ -52,9 +52,9 @@ async function saveSavedDevices() {
 app.use(express.json());
 app.use(express.static('public'));
 
-app.use('/api', createAuthRoutes(config.adminPassword));
-app.use('/api/devices', auth(config.adminPassword), createDeviceRoutes(devices));
-app.use('/api/wol', auth(config.adminPassword), createWolRoutes(devices, savedDevices, saveSavedDevices));
+app.use('/api', createAuthRoutes(config.adminPassword, config.jwtSecret));
+app.use('/api/devices', auth(config.jwtSecret), createDeviceRoutes(devices));
+app.use('/api/wol', auth(config.jwtSecret), createWolRoutes(devices, savedDevices, saveSavedDevices));
 
 createWebSocketHandler(wss, devices, config.authToken);
 
