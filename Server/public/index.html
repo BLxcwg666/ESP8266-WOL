@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wake on LAN</title>
+    <link rel="stylesheet" href="https://unpkg.com/element-plus@2.4.0/dist/index.css">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/vue@3.3.0/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/element-plus@2.4.0/dist/index.full.js"></script>
+    <script src="https://unpkg.com/@element-plus/icons-vue@2.1.0/dist/index.iife.js"></script>
+</head>
+<body>
+    <div id="app">
+        <div v-if="!isLoggedIn" class="login-container">
+            <div class="login-box">
+                <h2 style="text-align: center; margin-bottom: 30px;">Wake on LAN</h2>
+                <el-form @submit.prevent="login">
+                    <el-form-item>
+                        <el-input 
+                            v-model="password" 
+                            type="password" 
+                            placeholder="password"
+                            size="large"
+                            @keyup.enter="login"
+                            :prefix-icon="Lock">
+                        </el-input>
+                    </el-form-item>
+                    <el-form-item>
+                        <el-button 
+                            type="primary" 
+                            size="large" 
+                            style="width: 100%"
+                            @click="login"
+                            :loading="loginLoading">
+                            登录
+                        </el-button>
+                    </el-form-item>
+                </el-form>
+            </div>
+        </div>
+
+        <div v-else class="main-container">
+            <div class="header">
+                <h1 style="margin: 0;">Wake on LAN</h1>
+                <div>
+                    <el-button @click="toggleTheme" :icon="isDarkTheme ? Sunny : Moon" class="theme-switch" circle></el-button>
+                    <el-button @click="refreshDevices" :icon="Refresh">刷新设备</el-button>
+                    <el-button @click="logout" type="danger" :icon="SwitchButton">退出</el-button>
+                </div>
+            </div>
+
+            <div class="content-card">
+                <h3>快速唤醒</h3>
+                <el-form :inline="true" @submit.prevent="sendWol">
+                    <el-form-item label="MAC地址">
+                        <el-input 
+                            v-model="quickMac" 
+                            placeholder="例如: AA-BB-CC-DD-EE-FF"
+                            style="width: 200px">
+                        </el-input>
+                    </el-form-item>
+                    <el-form-item label="目标设备">
+                        <el-select v-model="targetDeviceId" placeholder="所有设备" clearable style="width: 200px">
+                            <el-option 
+                                v-for="device in onlineDevices" 
+                                :key="device.id"
+                                :label="device.id"
+                                :value="device.id">
+                                <span :class="device.authenticated ? 'status-dot status-online' : 'status-dot status-offline'"></span>
+                                {{ device.id }}
+                            </el-option>
+                        </el-select>
+                    </el-form-item>
+                    <el-form-item>
+                        <el-button type="primary" @click="sendWol" :icon="Promotion">发送</el-button>
+                    </el-form-item>
+                </el-form>
+            </div>
+
+            <div class="content-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3 style="margin: 0;">保存的设备</h3>
+                    <el-button type="primary" @click="showAddDialog = true" :icon="Plus">添加设备</el-button>
+                </div>
+                
+                <el-row :gutter="20">
+                    <el-col v-for="device in savedDevices" :key="device.id" :xs="24" :sm="12" :md="8" :lg="6">
+                        <el-card class="device-card" style="margin-bottom: 20px;">
+                            <template #header>
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span>{{ device.name }}</span>
+                                    <el-dropdown>
+                                        <el-button :icon="More" text></el-button>
+                                        <template #dropdown>
+                                            <el-dropdown-menu>
+                                                <el-dropdown-item @click="editDevice(device)" :icon="Edit">编辑</el-dropdown-item>
+                                                <el-dropdown-item @click="deleteDevice(device)" :icon="Delete" divided>删除</el-dropdown-item>
+                                            </el-dropdown-menu>
+                                        </template>
+                                    </el-dropdown>
+                                </div>
+                            </template>
+                            <div>
+                                <p><strong>MAC:</strong> {{ device.mac }}</p>
+                                <p v-if="device.description"><strong>描述:</strong> {{ device.description }}</p>
+                                <el-button type="primary" size="small" @click="wakeDevice(device)" :icon="Promotion">唤醒</el-button>
+                            </div>
+                        </el-card>
+                    </el-col>
+                </el-row>
+
+                <el-empty v-if="savedDevices.length === 0" description="暂无保存的设备"></el-empty>
+            </div>
+
+            <div class="content-card online-devices">
+                <h3>在线的 ESP 设备</h3>
+                <el-table :data="onlineDevices" stripe>
+                    <el-table-column prop="id" label="设备ID"></el-table-column>
+                    <el-table-column prop="ip" label="IP地址"></el-table-column>
+                    <el-table-column label="状态">
+                        <template #default="scope">
+                            <el-tag :type="scope.row.authenticated ? 'success' : 'warning'">
+                                {{ scope.row.authenticated ? '已连接' : '未认证' }}
+                            </el-tag>
+                        </template>
+                    </el-table-column>
+                    <el-table-column prop="connectedAt" label="连接时间" :formatter="formatTime"></el-table-column>
+                </el-table>
+            </div>
+        </div>
+
+        <el-dialog v-model="showAddDialog" :title="editingDevice ? '编辑设备' : '添加设备'" width="500px">
+            <el-form :model="deviceForm" label-width="80px">
+                <el-form-item label="设备名称" required>
+                    <el-input v-model="deviceForm.name" placeholder="例如: 神威·太湖之光"></el-input>
+                </el-form-item>
+                <el-form-item label="MAC地址" required>
+                    <el-input v-model="deviceForm.mac" placeholder="例如: 11-45-14-19-19-81"></el-input>
+                </el-form-item>
+                <el-form-item label="描述">
+                    <el-input v-model="deviceForm.description" type="textarea" rows="3" placeholder="可选"></el-input>
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="showAddDialog = false">取消</el-button>
+                <el-button type="primary" @click="saveDevice">保存</el-button>
+            </template>
+        </el-dialog>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+        const { ElMessage, ElMessageBox } = ElementPlus;
+        
+        const icons = ElementPlusIconsVue;
+        
+        createApp({
+            data() {
+                return {
+                    isLoggedIn: false,
+                    password: '',
+                    loginLoading: false,
+                    token: '',
+                    
+                    quickMac: '',
+                    targetDeviceId: '',
+                    
+                    savedDevices: [],
+                    onlineDevices: [],
+                    
+                    showAddDialog: false,
+                    editingDevice: null,
+                    deviceForm: {
+                        name: '',
+                        mac: '',
+                        description: ''
+                    },
+                    
+                    Lock: icons.Lock,
+                    Refresh: icons.Refresh,
+                    SwitchButton: icons.SwitchButton,
+                    Plus: icons.Plus,
+                    Promotion: icons.Promotion,
+                    More: icons.More,
+                    Edit: icons.Edit,
+                    Delete: icons.Delete,
+                    Monitor: icons.Monitor,
+                    Connection: icons.Connection,
+                    Sunny: icons.Sunny,
+                    Moon: icons.Moon
+                };
+            },
+            
+            computed: {
+                isDarkTheme() {
+                    const theme = document.documentElement.getAttribute('data-theme');
+                    if (theme) {
+                        return theme === 'dark';
+                    }
+                    // If no theme is set, check system preference
+                    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+                },
+                themeButtonType() {
+                    return this.isDarkTheme ? 'default' : 'default';
+                }
+            },
+
+            methods: {
+                async login() {
+                    if (!this.password) {
+                        ElMessage.warning('Password is required');
+                        return;
+                    }
+                    
+                    this.loginLoading = true;
+                    try {
+                        const response = await fetch('/api/login', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ password: this.password })
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            this.token = data.token;
+                            this.isLoggedIn = true;
+                            
+                            localStorage.setItem('wol-token', this.token);
+                            localStorage.setItem('wol-token-expires', Date.now() + data.expiresIn);
+                            
+                            ElMessage.success('登录成功');
+                            this.loadData();
+                        } else {
+                            ElMessage.error(data.message || '登录失败');
+                        }
+                    } catch (error) {
+                        ElMessage.error('登录失败：' + error.message);
+                    } finally {
+                        this.loginLoading = false;
+                    }
+                },
+                
+                logout() {
+                    this.isLoggedIn = false;
+                    this.token = '';
+                    localStorage.removeItem('wol-token');
+                    localStorage.removeItem('wol-token-expires');
+                },
+                
+                async apiRequest(url, options = {}) {
+                    const response = await fetch(url, {
+                        ...options,
+                        headers: {
+                            'Authorization': `Bearer ${this.token}`,
+                            'Content-Type': 'application/json',
+                            ...options.headers
+                        }
+                    });
+                    
+                    if (response.status === 401) {
+                        this.logout();
+                        ElMessage.error('认证失败，请重新登录');
+                        throw new Error('Unauthorized');
+                    }
+                    
+                    const data = await response.json();
+                    if (!response.ok) {
+                        throw new Error(data.error || '请求失败');
+                    }
+                    
+                    return data;
+                },
+                
+                async loadData() {
+                    await Promise.all([
+                        this.loadSavedDevices(),
+                        this.loadOnlineDevices()
+                    ]);
+                },
+                
+                async loadSavedDevices() {
+                    try {
+                        const devices = await this.apiRequest('/api/wol/devices');
+                        this.savedDevices = devices;
+                    } catch (error) {
+                        console.error('加载设备失败:', error);
+                    }
+                },
+                
+                async loadOnlineDevices() {
+                    try {
+                        const devices = await this.apiRequest('/api/devices');
+                        this.onlineDevices = devices;
+                    } catch (error) {
+                        console.error('加载在线设备失败:', error);
+                    }
+                },
+                
+                refreshDevices() {
+                    this.loadData();
+                    ElMessage.success('已刷新');
+                },
+                
+                async sendWol() {
+                    if (!this.quickMac) {
+                        ElMessage.warning('请输入MAC地址');
+                        return;
+                    }
+                    
+                    try {
+                        const result = await this.apiRequest('/api/wol/send', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                mac: this.quickMac,
+                                deviceId: this.targetDeviceId || undefined
+                            })
+                        });
+                        
+                        ElMessage.success(result.message);
+                        this.quickMac = '';
+                    } catch (error) {
+                        ElMessage.error('发送失败：' + error.message);
+                    }
+                },
+                
+                async wakeDevice(device) {
+                    try {
+                        const result = await this.apiRequest('/api/wol/send', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                mac: device.mac,
+                                deviceId: this.targetDeviceId || undefined
+                            })
+                        });
+                        
+                        ElMessage.success(`已发送唤醒命令到 ${device.name}`);
+                    } catch (error) {
+                        ElMessage.error('发送失败：' + error.message);
+                    }
+                },
+                
+                editDevice(device) {
+                    this.editingDevice = device;
+                    this.deviceForm = { ...device };
+                    this.showAddDialog = true;
+                },
+                
+                async saveDevice() {
+                    if (!this.deviceForm.name || !this.deviceForm.mac) {
+                        ElMessage.warning('请填写设备名称和MAC地址');
+                        return;
+                    }
+                    
+                    try {
+                        if (this.editingDevice) {
+                            await this.apiRequest(`/api/wol/devices/${this.editingDevice.id}`, {
+                                method: 'PUT',
+                                body: JSON.stringify(this.deviceForm)
+                            });
+                            ElMessage.success('更新成功');
+                        } else {
+                            await this.apiRequest('/api/wol/devices', {
+                                method: 'POST',
+                                body: JSON.stringify(this.deviceForm)
+                            });
+                            ElMessage.success('添加成功');
+                        }
+                        
+                        this.showAddDialog = false;
+                        this.editingDevice = null;
+                        this.deviceForm = { name: '', mac: '', description: '' };
+                        this.loadSavedDevices();
+                    } catch (error) {
+                        ElMessage.error('保存失败：' + error.message);
+                    }
+                },
+                
+                async deleteDevice(device) {
+                    try {
+                        await ElMessageBox.confirm(
+                            `确定要删除设备 "${device.name}" 吗？`,
+                            '确认删除',
+                            {
+                                confirmButtonText: '删除',
+                                cancelButtonText: '取消',
+                                type: 'warning'
+                            }
+                        );
+                        
+                        await this.apiRequest(`/api/wol/devices/${device.id}`, {
+                            method: 'DELETE'
+                        });
+                        
+                        ElMessage.success('删除成功');
+                        this.loadSavedDevices();
+                    } catch (error) {
+                        if (error !== 'cancel') {
+                            ElMessage.error('删除失败：' + error.message);
+                        }
+                    }
+                },
+                
+                formatTime(row, column, value) {
+                    return new Date(value).toLocaleString();
+                },
+
+                toggleTheme() {
+                    const currentTheme = document.documentElement.getAttribute('data-theme');
+                    let newTheme;
+                    
+                    if (!currentTheme) {
+                        // If no theme is set, check current preference
+                        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                        newTheme = prefersDark ? 'light' : 'dark';
+                    } else {
+                        newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                    }
+                    
+                    document.documentElement.setAttribute('data-theme', newTheme);
+                    localStorage.setItem('wol-theme', newTheme);
+                    
+                    // Force Element Plus to update its theme
+                    this.$nextTick(() => {
+                        // Trigger a re-render of Element Plus components
+                        document.body.style.display = 'none';
+                        document.body.offsetHeight; // Trigger reflow
+                        document.body.style.display = '';
+                    });
+                }
+            },
+            
+            mounted() {
+                // Initialize theme
+                const savedTheme = localStorage.getItem('wol-theme');
+                if (savedTheme) {
+                    // Use saved theme preference
+                    document.documentElement.setAttribute('data-theme', savedTheme);
+                } else {
+                    // Auto detect browser preference
+                    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                    if (prefersDark) {
+                        document.documentElement.setAttribute('data-theme', 'dark');
+                    }
+                }
+
+                // Listen for system theme changes
+                window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+                    // Only auto switch if user hasn't manually set a preference
+                    if (!localStorage.getItem('wol-theme')) {
+                        document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+                    }
+                });
+
+                // Check saved token
+                const savedToken = localStorage.getItem('wol-token');
+                const tokenExpires = localStorage.getItem('wol-token-expires');
+                
+                if (savedToken && tokenExpires && Date.now() < parseInt(tokenExpires)) {
+                    this.token = savedToken;
+                    this.isLoggedIn = true;
+                    this.loadData();
+                    
+                    setInterval(() => {
+                        this.loadOnlineDevices();
+                    }, 5000);
+                }
+            }
+        }).use(ElementPlus).mount('#app');
+    </script>
+</body>
+</html>

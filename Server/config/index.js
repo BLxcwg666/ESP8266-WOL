@@ -1,0 +1,12 @@
+require('dotenv').config();
+
+const config = {
+  port: process.env.PORT || 3000,
+  authToken: process.env.AUTH_TOKEN || 'bbbbbbbbbbb',
+  adminPassword: process.env.ADMIN_PASSWORD || 'bbbbbbbbbbbbbbbbbbb',
+  wsPath: '/ws',
+  devicesFile: 'wol-devices.json',
+  isDevelopment: process.env.NODE_ENV === 'development'
+};
+
+module.exports = config;
