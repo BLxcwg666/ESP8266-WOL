@@ -4,13 +4,13 @@ A Web-controlled Wake-on-LAN trigger running on ESP8266, featuring HTTP and WebS
 ## Introduction
 这是一个基于 ESP8266 的 Wake-on-Lan（WOL）解决方案  
 特点：  
-- Cloud based
+- Cloud based  
 无需拥有公网IP，仅需一个可以部署在云上的环境，即可实现异地远程开机  
-- C/S
+- C/S  
 ESP 作为客户端设备，启动后主动连接到云上，从而允许你在任何地点通过浏览器向你的局域网发送 WOL 数据包  
-- Open API
+- Open API  
 你可以通过 API 自由扩展，比如：Telegram Bot ?
-- Easy Auth
+- Easy Auth  
 单参数鉴权，简单，~~安不安全我不知道，但是能用~~
 
 ## Run
